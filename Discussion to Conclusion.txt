@@ -1,0 +1,21 @@
+\subsection{Discussion}
+\label{sec:resultsdiscussion}
+
+The results support a narrower, more specific claim than the initial hypothesis that explicit ratio supervision uniformly improves N:C ratio reliability. First, both mechanisms' effect is backbone-dependent: on the Attention U-Net, whose decoder already performs scSE-based feature recalibration, adding ratio-aware recalibration and supervision does not help and, for the ratio-consistency loss alone, significantly reduces both Dice and ratio agreement relative to baseline; on the plain U-Net, which has no comparable built-in recalibration, RFG improves ratio bias and ICC without a significant Dice cost. This suggests RFG and scSE attention serve an overlapping functional role (feature recalibration before or within the decoder), so combining both does not compound their benefit. Second, and more directly relevant to this paper's motivating argument, the transfer-learning result on AML-Cytomorphology\_LMU (Table~\ref{tab:transfer}) is itself a controlled demonstration that Dice improvement and N:C ratio improvement are separable outcomes: pretraining moves Dice by $+0.09$ ($p=0.007$) while leaving ratio error statistically unchanged ($p=0.78$). This is direct empirical support for evaluating segmentation intended for morphometric use by the downstream measurement, independently of overlap metrics, regardless of whether the specific mechanisms proposed here are the ones that ultimately close that gap.
+
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+\begin{itemize}
+\item The AML training subset is small and class-imbalanced (345 images, 15 classes), yielding high seed-to-seed variance from random initialization (gold-subset Dice 0.70--0.86).
+\item AML reference masks, including the gold subset, are single-pass corrected pseudo-labels rather than multi-expert consensus, so absolute AML ratio-error and ICC values reflect combined model-and-label uncertainty.
+\item RFG's probe head is auxiliary-supervised whenever RFG is enabled (Section~\ref{sec:totalloss}), so the ``RFG only'' condition is not a fully isolated architectural comparison.
+\item Frozen-encoder transfer and stain-augmented fine-tuning are deferred to future work due to single-GPU infrastructure constraints.
+\item Paired comparisons are uncorrected for multiplicity; only findings with $p<0.01$ should be treated as robust, given the $n=5$ seed budget.
+\end{itemize}
+
+
+\section{Conclusion} \label{sec:conclusion}
+
+This study proposed two independently switchable, low-overhead mechanisms, a ratio-consistency loss and a Ratio-Feedback Gate, to directly target N:C ratio preservation in nucleus--cytoplasm segmentation for AML morphometry, and evaluated them under a controlled ablation across two backbones and two datasets. Neither mechanism produced a uniform improvement: their effect depends on whether the backbone already performs its own decoder-level feature recalibration, helping ratio agreement on a plain U-Net but not on an Attention U-Net with scSE decoder attention, and showing no reliable benefit after transfer to the noisier AML target domain. The study's clearest finding is orthogonal to the specific mechanisms tested: transferring a WBCAtt+-pretrained checkpoint to AML-Cytomorphology\_LMU significantly improves Dice but leaves N:C ratio error statistically unchanged, empirically confirming this paper's motivating claim that overlap-based segmentation quality and morphometric measurement reliability are separable outcomes that must be evaluated and reported independently. Future work should resolve the AML pseudo-label noise ceiling with a larger expert-verified reference set, evaluate frozen-encoder and stain-augmented transfer regimes, and decouple RFG's architectural recalibration from its auxiliary probe supervision to isolate each mechanism's independent contribution.
