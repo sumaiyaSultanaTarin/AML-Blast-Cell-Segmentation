@@ -1,0 +1,509 @@
+\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}% Math and Physical Sciences Numbered Reference Style
+
+%%%% Standard Packages
+\usepackage{graphicx}%
+\usepackage{multirow}%
+\usepackage{amsmath,amssymb,amsfonts}%
+\usepackage{amsthm}%
+\usepackage{mathrsfs}%
+\usepackage[title]{appendix}%
+\usepackage{xcolor}%
+\usepackage{textcomp}%
+\usepackage{manyfoot}%
+\usepackage{booktabs}%
+\usepackage{algorithm}%
+\usepackage{algorithmicx}%
+\usepackage{algpseudocode}%
+\usepackage{listings}%
+\usepackage[most]{tcolorbox}
+\usepackage{tabularx}
+%%%%
+
+%% as per the requirement new theorem styles can be included as shown below
+\theoremstyle{thmstyleone}%
+\newtheorem{theorem}{Theorem}%
+\newtheorem{proposition}[theorem]{Proposition}%
+
+\theoremstyle{thmstyletwo}%
+\newtheorem{example}{Example}%
+\newtheorem{remark}{Remark}%
+
+\theoremstyle{thmstylethree}%
+\newtheorem{definition}{Definition}%
+
+\raggedbottom
+
+\makeatletter
+\let\sn@oldprintabstract\printabstract
+\renewcommand{\printabstract}{%
+  \begin{tcolorbox}[
+      enhanced,
+      breakable,
+      colback=blue!4,
+      colframe=blue!35!black,
+      colbacktitle=blue!35!black,
+      coltitle=white,
+      boxrule=0.6pt,
+      arc=2pt,
+      title=\textbf{Author Contributions},
+      fonttitle=\bfseries\small,
+      left=6pt, right=6pt, top=4pt, bottom=4pt
+  ]
+  \footnotesize
+\textbf{Sumaiya Sultana Tarin:} Co-wrote the Introduction (Section~\ref{sec:1}); wrote the full Methodology (Section~\ref{sec:3}), including the ratio-consistency loss and Ratio-Feedback Gate (RFG) formulation ;produced Figure~1 (pipeline overview) implemented all code in the Google Colab notebook (data pipeline, segmentation backbones, training loop, Phase~I ablation runs, transfer-learning experiments); generated all reported results (Section~\ref{sec:5}).\par\smallskip
+\textbf{Shohana Khondoker:} Wrote the Related Work (Section~\ref{sec:2}); produced Figure~2 (pseudo-label generation pipeline) and wrote the corresponding AML Pseudo-Label Generation subsection (Section~\ref{sec:pseudolabel}).\par\smallskip
+\textbf{Fahim Tarik Al Said:} Co-wrote the Introduction (Section~\ref{sec:1}); wrote the Experimental Setup (Section~\ref{sec:4}); wrote the Abstract, Discussion (Section~\ref{sec:resultsdiscussion}), Limitations (Section~\ref{sec:limitations}), and Conclusion (Section~\ref{sec:conclusion}).
+  \end{tcolorbox}
+  \sn@oldprintabstract
+}
+\makeatother
+
+\begin{document}
+
+\title[Article Title]{Ratio-Consistency Loss and Ratio-Feedback Gating for Nucleus–Cytoplasm Segmentation: A Measurement-Reliability Evaluation in Acute Myeloid Leukemia}
+
+\author*[1]{\fnm{Sumaiya} \sur{Sultana Tarin}}\email{26-94006-1@student.aiub.edu}
+\author[1]{\fnm{Shohana} \sur{Khondoker}}\email{26-94165-2@student.aiub.edu}
+\author[1]{\fnm{Fahim Tarik} \sur{Al Said}}\email{26-94096-2@student.aiub.edu   }
+
+\affil*[1]{\orgdiv{Computer Science}, \orgname{American International University-Bangladesh (AIUB)}, \orgaddress{\street{Kuratoli}, \city{Dhaka}, \postcode{1229}, \country{Bangladesh}}}
+
+
+\abstract{Segmentation models for white blood cell (WBC) images are typically trained with overlap-based losses (Dice, Focal), which do not guarantee that a downstream clinical measurement, such as the nucleus-to-cytoplasm (N:C) ratio used in acute myeloid leukemia (AML) morphology, is preserved. We propose two independently switchable mechanisms that target N:C ratio preservation directly: a ratio-consistency loss that penalizes log-ratio error against the expert mask, and a Ratio-Feedback Gate (RFG), a lightweight decoder module that estimates the network's own N:C ratio and uses it to recalibrate features before the segmentation head. Both are evaluated in a controlled ablation (30 runs, 5 seeds) on the source-domain WBCAtt+ dataset across an Attention U-Net (scSE decoder attention) and a plain U-Net backbone, then transferred to a pseudo-labeled, human-spot-checked target-domain subset of AML-Cytomorphology\_LMU. On WBCAtt+, the two mechanisms are backbone-dependent: on the plain U-Net they modestly improve N:C agreement (ICC(A,1) 0.988$\to$0.990; Bland-Altman bias 0.019$\to$0.009), but on the Attention U-Net backbone the same configuration does not improve ratio error and slightly regresses Dice ($p<0.01$, $n=5$ seeds), indicating the benefit of explicit ratio supervision depends on whether the backbone already performs its own decoder-level recalibration. On the target domain, initializing from the WBCAtt+ checkpoint significantly improves segmentation Dice on a held-out, human-reviewed gold subset (0.77$\to$0.86, $p=0.007$) but not N:C ratio error ($p=0.78$), directly illustrating this paper's central argument: an overlap-metric gain does not imply a matched gain in measurement reliability. RFG's target-domain effect was null-to-negative for both backbones, consistent with its gate output remaining close to its initialization throughout training. These results argue for evaluating and reporting segmentation methods intended for morphometric use by the downstream measurement itself, not by overlap metrics alone.
+}
+
+\keywords{Acute myeloid leukemia, nucleus-cytoplasm segmentation, ratio-consistency loss, Ratio-Feedback Gate, medical image segmentation, transfer learning}
+
+\maketitle
+
+
+\section{Introduction}\label{sec:1}
+
+Acute myeloid leukemia (AML) is a heterogeneous myeloid malignancy in which diagnosis combines morphology with immunophenotypic, cytogenetic, and molecular evidence \cite{1}. Peripheral-blood and bone-marrow smear examination remains important because it gives a direct view of blast-cell structure and maturity \cite{2}. Recent leukemia reviews also note that visible cell morphology still supports subtype assessment even though modern classification is no longer based on morphology alone \cite{3}. Automated image analysis is therefore most useful when it supports, rather than replaces, the full diagnostic process \cite{4}.
+
+Manual blood-smear review is slow, depends on trained staff, and may vary between observers \cite{5}. Public datasets and deep-learning methods have increased the amount of research on automated leukemia detection \cite{6}. A broad review of white blood cell (WBC) studies found a clear shift from traditional machine learning toward convolutional neural networks and other deep models \cite{7}. However, most published work still reports classification accuracy rather than the reliability of measurements taken from segmented cellular structures.
+
+Deep learning has already shown that AML-related visual patterns can be learned from bone-marrow smears and can be linked with NPM1 mutation status \cite{8}. Separate work has distinguished myeloblasts from lymphoblasts using expert-labelled peripheral-blood cell images \cite{9}. ConvNeXt-based analysis has also been used for high-resolution AML morphology and subtype recognition \cite{10}. A two-stage model has classified atypical WBCs in AML after using segmentation to reduce background influence \cite{11}. Transfer-learning and autoencoder fusion have similarly been applied to immature AML cell recognition \cite{12}. Other feature-fusion networks have used grayscale, texture, and gradient information to classify hematologic cell images \cite{13}. Hybrid deep-learning and machine-learning pipelines have also been used for multiclass leukemia-cell classification \cite{14}. More recent work has compared several pretrained models and added explainability methods for automated leukemia detection \cite{15}. Cross-platform deep learning has further been explored for acute-leukemia subtype classification from bone-marrow smears \cite{16}. Artificial-intelligence-assisted smear analysis has also been studied for acute promyelocytic leukemia monitoring \cite{17}.
+
+These studies show that cell images contain useful diagnostic information, but a class label does not directly explain whether the nucleus and cytoplasm have been outlined correctly. Radiomics-based WBC analysis has shown that area, perimeter, color, shape, and texture features depend strongly on the quality of cell-region extraction \cite{18}. Nuclear morphometry has also been used to describe cuplike blast morphology associated with NPM1-mutated AML \cite{19}. This makes separate nucleus and cytoplasm segmentation important when the final goal is quantitative morphology rather than only classification.
+
+Large WBC datasets have improved the study of cellular structure. Raabin-WBC provides cell locations, classes, and expert-reviewed nucleus and cytoplasm masks across a large image collection \cite{20}. Multi-dataset work has also shown that nucleus and cytoplasm segmentation can be tested on train-independent WBC images \cite{21}. Threshold-based methods remain useful for separating the nucleus and cytoplasm when staining contrast is adequate \cite{22}. Encoder--decoder models that represent boundary indeterminacy have been proposed for cases where WBC edges are unclear \cite{23}. Color-space analysis and convolutional models have further shown that illumination, stain, overlap, and low-contrast cytoplasm can strongly affect blood-cell segmentation \cite{24}.
+
+Generalization across staining and acquisition conditions is another major issue. A stain-standardized framework has been evaluated across several heterogeneous leukocyte datasets \cite{25}. Unified training across different cytological stains has also shown that one model can preserve boundary quality without using a separate pipeline for every stain \cite{26}. Foundation-model adaptation has recently been explored for prompt-free WBC segmentation under limited annotation and cross-dataset testing \cite{27}. Cellpose-SAM further suggests that biological segmentation models can approach or exceed average human agreement when they are trained for broad out-of-distribution generalization \cite{28}.
+
+The central problem is that a good-looking mask does not mean a good measurement. A model can get a high Dice score and still cut off a thin part of the cytoplasm. In an AML blast, that small mistake can create a large error in the nucleus-to-cytoplasm (N:C) ratio. It can also change the circularity, eccentricity, solidity, and perimeter values used to describe the cell. Most segmentation losses, such as Dice, Focal, and boundary-distance losses, only push the model to match the shape of the mask. None of them tell the model to protect the ratio value itself.
+
+This study presents a reliability-aware framework for the separate segmentation of nuclei and cytoplasm in AML cell images. The framework combines two complementary mechanisms that target the same underlying problem from different points in the training and inference pipeline: a ratio-consistency loss that penalizes N:C ratio error during training, and a Ratio-Feedback Gate (RFG), an architectural module that gives the network a mechanism to act on its own ratio estimate before a final prediction is committed. Both mechanisms are first validated on WBCAtt+, a source-domain dataset with expert-annotated component masks, under a controlled ablation across two backbone architectures. The validated configuration is then transferred to a target-domain subset of AML-Cytomorphology LMU. The predicted masks are converted into morphometric measurements and compared, on an independently human-reviewed subset, with measurements derived from expert-corrected reference masks. The primary backbone is further evaluated under both random initialization and WBCAtt+-pretrained training settings on the AML target domain, and RFG is separately re-evaluated on the AML target domain for both backbones trained from random initialization.
+
+The main contributions of this study are summarized as follows:
+
+\begin{itemize} 
+    \item A ratio-consistency loss that directly encourages the model to preserve the nucleus-to-cytoplasm (N:C) ratio during segmentation training.
+    \item A RFG, a lightweight module that estimates the network's N:C ratio and uses it to recalibrate decoder features before prediction, letting the network act on ratio information rather than only being penalized for it.
+    \item A controlled ablation across two backbones on the full WBCAtt+ dataset isolating the contributions of the ratio-consistency loss and the RFG module, and testing whether RFG generalizes beyond a single backbone's attention mechanism. 
+    \item An automatic, color- and shape-based pseudo-labeling procedure for generating an AML nucleus--cytoplasm reference subset from the AML-Cytomorphology\_LMU dataset. 
+    \item A reliability-oriented evaluation framework that links segmentation quality with morphometric error, boundary accuracy, uncertainty, and measurement agreement. 
+\end{itemize}
+
+The remainder of this paper is organized as follows. Section~\ref{sec:2} reviews previous work on leukemia image analysis, WBC segmentation, morphometry, and annotation reliability. Section~\ref{sec:3} presents the study design, datasets, annotation process, segmentation methods, and statistical analysis. Section~\ref{sec:4} describes the experimental setup. Section~\ref{sec:5} reports the in-domain, ablation, and target-domain results and discusses their implications. Section~\ref{sec:conclusion} concludes the paper.
+
+\section{Related Work}\label{sec:2}
+
+\subsection{Segmentation-Assisted Leukemia Analysis}
+
+Several leukemia systems use segmentation mainly as a preparation step for classification. A transfer-learning fusion model combined synthetic augmentation, color normalization, deep features, and semantic segmentation before identifying leukocyte classes \cite{29}. A U-Net-based framework similarly used segmentation and feature extraction to support ALL and AML categorization across multiple datasets \cite{30}. DeepSegNet compared improved PSPNet, feature-pyramid, and DeepLabV3+ variants for blood-cell image segmentation \cite{31}. A more recent lightweight pipeline used U-Net to remove background regions before blood-cell classification \cite{32}. An explainable computer-aided system for acute lymphoblastic leukemia also placed robust WBC segmentation before the final classifier \cite{33}.
+
+These studies support the value of segmentation, but their main target is usually diagnostic classification. The segmentation is often judged by global overlap or accuracy, and the later analysis does not test whether internal compartment measurements are preserved. This is an important difference from the present study, where segmentation is treated as a measurement tool.
+
+\subsection{Leukocyte Classification and Representation Learning}
+
+Fine-grained WBC classification remains difficult because visually similar classes are often imbalanced. A global--local attention transformer was designed to learn both complete-cell and local morphological information under class imbalance \cite{34}. ConcatNeXt combined ConvNeXt-style feature extraction with nested patch-based feature engineering for blood-cell classification \cite{35}. A custom deep network used heatmaps to show which WBC image regions contributed to each prediction \cite{36}. A lightweight efficient-channel-attention network focused on cross-dataset classification and reduced computational cost \cite{37}. MayGAN used generative augmentation and mayfly optimization to improve leukemia classification from blood-smear images \cite{38}.
+
+These classification studies provide useful ideas for feature learning, imbalance handling, and explainability. However, they do not directly validate the geometry of predicted nucleus and cytoplasm masks. A correct class prediction can still be produced from incomplete or biased morphological regions.
+
+\subsection{Recent Segmentation Architectures}
+
+Hybrid convolutional architectures have been proposed to improve local and global feature extraction. BCU-Net combines ConvNeXt blocks with the U-Net structure and includes a loss design for class imbalance \cite{39}. KC-UNet adds Kolmogorov--Arnold Network components and channel--spatial attention to a U-shaped medical-segmentation model \cite{40}. A U-Net++ and attention-gate model has also been evaluated on multi-modal high-resolution cell images with varied sizes and impurities \cite{41}. A saliency-enhanced framework was designed to improve stain robustness and provide more interpretable WBC segmentation and classification \cite{42}.
+
+Public data remain a limiting factor. The KRD-WBC resource contains 600 high-resolution WBC images and whole-cell masks, but its authors note that further annotation is still needed for separate nucleus and cytoplasm analysis \cite{43}. A methodological review of red blood cell analysis shows that measurements such as area, perimeter, circularity, and shape are only useful when segmentation is stable under overlap and staining variation \cite{44}. Although the cell type is different, this point directly applies to AML morphometry.
+
+\subsection{Annotation Quality and Measurement Agreement}
+
+Human-in-the-loop annotation is becoming more common when full manual segmentation is too slow. A SAM2-based RGB--thermal pipeline showed that automatic proposals can reduce annotation time when human refinement and inter-annotator quality checks are retained \cite{45}. Although that study is outside hematology, its quality-control design is relevant to the planned AML annotation workflow.
+
+Agreement analysis is also needed because automated and visual measurements may not be interchangeable. A recent brain-morphometry study found poor agreement between visual ratings and automated measurements even when both were related to the same clinical problem \cite{46}. This does not prove the same result for blood cells, but it shows why correlation alone is not enough for method comparison. The wider lesson is that expert context and explicit disagreement analysis remain necessary when morphology is ambiguous.
+
+\subsection{Leukemia Reviews and Emerging Explainable Models}
+
+Recent systematic reviews describe rapid growth in machine learning, deep learning, transfer learning, and optimization-based leukemia analysis \cite{48}. A separate review of blood-smear leukemia classification also identified limited datasets, uneven validation, and weak clinical testing as repeated problems \cite{49}. A survey of acute leukemia and WBC analysis found that preprocessing, segmentation, feature extraction, and classification are still commonly evaluated as separate stages \cite{50}. Explainable transformer models have begun to combine attention, memory, causal reasoning, and counterfactual analysis for leukemia diagnosis \cite{51}. Slide-level multiple-instance learning has also been used to connect interpretable cell-level evidence with hematologic diagnosis from peripheral-blood smears \cite{52}.
+
+\subsection{Loss Functions for Segmentation and Measurement Accuracy}
+
+Most segmentation losses, such as Dice and cross-entropy, only check pixel overlap and do not protect the specific measurement a task actually needs. Sun et al. proposed the Boundary DoU loss, which focuses on the border area to produce sharper edges \cite{55}. Szustakowski et al. made a similar point for a different measurement, showing that standard losses can produce masks with good overlap scores while still breaking structure length, so they designed a loss that directly protects length instead \cite{56}. This shows that a loss built around the true target measurement works better than one built around pixel overlap alone. In our case, the target measurement is the nucleus-to-cytoplasm ratio.
+
+The reviewed literature shows three connected gaps. First, AML datasets rarely provide expert masks for separate nucleus and cytoplasm compartments. Second, segmentation is usually evaluated as an image-processing output rather than as the source of a continuous biological measurement. Third, uncertainty and annotator disagreement are rarely linked with the error of the final morphometric value. The proposed study addresses these gaps through AML-specific compartment annotation, cross-domain transfer, direct measurement agreement, and selective expert review.
+
+
+\section{Methodology}\label{sec:3}
+
+\subsection{Study Design}
+
+The research follows two connected phases. Phase I trains and validates the proposed ratio-consistency loss and the proposed RFG module on the source-domain WBCAtt+ dataset, using its full official split and a controlled ablation across two backbone architectures. Phase II transfers the best-performing Phase I configuration to the target-domain AML-Cytomorphology LMU dataset, using automatically generated pseudo-labels. Separating the phases prevents target-domain claims from being made before the source-domain foundation is validated.
+
+\subsection{Pipeline Overview}
+\label{sec:pipeline}
+ 
+Figure~\ref{fig:overview} shows the full flow of the proposed method, organized into three stages: feature learning, compartment prediction, and morphometric-consistency supervision. A normalized input cell image is passed through the segmentation backbone (Attention U-Net illustrated), where encoder features at each downsampling level are propagated to the decoder through skip connections; at the Attention U-Net's decoder blocks, concurrent spatial and channel squeeze-and-excitation (scSE) attention recalibrates the fused features, preserving fine spatial detail relevant to thin cytoplasmic boundaries alongside the deep semantic features formed at the bottleneck.
+ 
+Before the resulting decoder feature map reaches the segmentation head, it is passed through the proposed RFG, which estimates the network's current soft nucleus-to-cytoplasm ratio from a lightweight probe head and uses it to recalibrate the decoder features (full formulation in Section~\ref{sec:rfg}). The segmentation head then applies a $1\times1$ convolution and softmax to the recalibrated features, producing three soft probability maps, background, cytoplasm, and nucleus, combined by argmax into the final hard masks.
+ 
+These outputs are used in two ways: the soft probability maps are compared with the reference mask using standard segmentation losses, Dice and Focal; and separately, the same soft maps yield a predicted N:C ratio in log space, compared with the true ratio from the expert three-class mask through the ratio-consistency loss (Section~\ref{sec:ratioloss}). All three terms are combined into one total loss (Section~\ref{sec:totalloss}). The RFG module and the ratio-consistency loss can each be switched on or off independently, which allows their individual and combined contributions to be isolated through ablation.
+ 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{archi.pdf}
+\caption{Overview of the proposed pipeline: feature learning with skip connections and scSE decoder attention, the Ratio-Feedback Gate, compartment prediction, and morphometric-consistency supervision.}
+\label{fig:overview}
+\end{figure*}
+
+
+\subsection{Datasets and Class Mapping}
+ 
+WBCAtt+ is used as the source-domain dataset because it contains 10,298 WBC images with detailed component annotations~\cite{47}. Its official split contains 6,169 training, 1,030 validation, and 3,099 test image--mask pairs, confirmed against the downloaded dataset, at a native resolution of $360\times360$. Raw masks contain six classes: background, cytoplasm, nucleus, red blood cell, platelet, and vacuole. For three-class training, nucleus pixels remain nucleus, ordinary cytoplasm and vacuole pixels are merged into cytoplasm, and red blood cells, platelets, and surrounding regions are treated as background. All Phase I experiments use the complete official split.
+ 
+AML-Cytomorphology~LMU is used as the target-domain image dataset. The dataset directory contains 18,250 single-cell images across fifteen morphological classes. Consistent with the source-domain grouping rationale, myeloblasts (MYO), monoblasts (MOB), promyelocytes (PMO, PMB), myelocytes (MYB), and metamyelocytes (MMZ) are grouped as blast-lineage or immature myeloid precursor cells (target 45 images each); the remaining nine classes (BAS, EBO, EOS, KSC, LYA, LYT, MON, NGB, NGS) are treated as mature or control cells (target 20 images each). Fifty images spanning all fifteen classes were withheld beforehand to form the gold subset (Section~\ref{sec:pseudolabel}); the training subset was then sampled from the remaining pool. Several classes fell short of their target because the underlying class is rare in the source dataset (blast-lineage: MMZ 13/45, MOB 24/45, PMB 16/45, MYB 40/45; control: KSC 13/20, LYA 9/20), so the training subset totals 345 images.
+ 
+Table~\ref{tab:datasets} summarizes the role, scale, and main limitation of each dataset used in the study.
+ 
+\begin{table*}[t]
+\caption{Dataset roles used in this study.}
+\label{tab:datasets}
+\centering
+\begin{tabular}{p{2.6cm}p{3.0cm}p{4.3cm}p{5.0cm}}
+\toprule
+Dataset & Role & Scale & Main limitation \\
+\midrule
+WBCAtt+ & Source-domain pretraining and Phase~I ablation & 10,298 image--mask pairs, $360\times360$; official split 6{,}169/1{,}030/3{,}099 & Mature WBCs rather than AML blasts \\
+AML-Cytomorphology~LMU & Target-domain fine-tuning and evaluation (Phase~II) & 18,250 images across 15 classes; 345-image blast/control training subset plus a 50-image human-reviewed gold subset & No expert nucleus--cytoplasm masks; reference labels are auto-generated pseudo-labels, not ground truth; no patient identifiers available \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{AML Pseudo-Label Generation}
+\label{sec:pseudolabel}
+
+Unlike WBCAtt+, AML-Cytomorphology~LMU provides no expert nucleus--cytoplasm masks. Reference masks for the AML subset are generated automatically by a rule-based procedure applied to each single-cell RGBA tile, shown in Figure~\ref{fig:pseudolabel}. These masks are treated explicitly as pseudo-labels, not expert-verified ground truth.
+
+The procedure has three steps. First, the tile's alpha channel isolates the valid image region from the surrounding zero-alpha padding; the RGB image is converted to HSV, and a three-class Otsu threshold (multi-level Otsu) is computed on the saturation channel within this valid region, splitting pixels directly into background, cytoplasm, and nucleus, reflecting that nuclear chromatin stains more intensely (higher saturation) than the surrounding cytoplasm. Second, because this per-pixel threshold can retain small noise regions, thin bridges to neighboring cells, and stray red blood cells, the resulting foreground mask (cytoplasm $\cup$ nucleus) is aggressively opened (binary erosion followed by binary dilation, 15 iterations), which removes thin connections and small artifacts while approximately preserving the extent of the true target cell. Third, connected-component labeling is applied to the opened mask, the component nearest the image center is retained as the target cell, and all foreground pixels outside this component are reset to background, discarding neighboring or touching cells; the original three-level saturation labels are kept for pixels inside the retained component, so the nucleus/cytoplasm split itself is unaffected by the opening step.
+
+A random sample of the resulting masks was reviewed against source images to confirm plausibility before use in training. In addition, 50 images spanning all fifteen morphological classes were exported for manual review and correction, producing a held-out, human-verified reference (the ``gold subset''). Because both the training pseudo-labels and a model trained on them share the same automatic procedure, evaluating only against further pseudo-labels risks the model appearing accurate simply by reproducing the procedure's own biases; the gold subset instead provides an evaluation reference that does not depend on that procedure, and is used throughout Phase~II evaluation alongside the AML validation split.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{pseudo.pdf}
+\caption{Pseudo-label generation pipeline for AML images. Labels are produced by a rule-based procedure combining Otsu thresholding of the HSV saturation channel with morphological cleanup and center-component selection.}
+\label{fig:pseudolabel}
+\end{figure*}
+
+\subsection{Preprocessing and Augmentation}
+
+WBCAtt+ images are normalized per channel and trained at native $360\times360$ resolution, with horizontal/vertical flips, rotation within $\pm15^{\circ}$, and mild color jitter applied identically to image and mask. AML images are resized to $256\times256$, with the same flip and jitter augmentations plus rotation within $\pm20^{\circ}$ and mild affine translation and scaling; the higher augmentation strength reflects the smaller subset size and greater staining variability across AML classes.
+
+\subsection{Segmentation Backbones}
+
+Two backbones are used for the Phase I ablation: Attention U-Net (ResNet-34 encoder, squeeze-and-excitation decoder attention) as the primary backbone, and a plain U-Net (ResNet-34 encoder, no decoder attention) as a control, testing whether the RFG module's contribution is backbone-agnostic rather than dependent on Attention U-Net's own attention mechanism. Table~\ref{tab:models} lists the role of each backbone.
+ 
+\begin{table}[t]
+\caption{Segmentation backbones used in this study.}
+\label{tab:models}
+\centering
+\begin{tabular}{p{2.3cm}p{5.0cm}}
+\toprule
+Backbone & Role \\
+\midrule
+Attention U-Net & Primary backbone; full ablation of RFG and ratio-consistency loss \\
+Plain U-Net & Control backbone; tests whether RFG's contribution generalizes beyond Attention U-Net's own decoder attention \\
+\bottomrule
+\end{tabular}
+\end{table}
+ 
+\subsection{Ratio-Consistency Loss}
+\label{sec:ratioloss}
+ 
+Standard Dice and Focal losses only measure mask overlap; they do not check whether a downstream measurement, such as the N:C ratio, is correct. Let $p_{n,i}$ and $p_{c,i}$ denote the predicted probability of pixel $i$ belonging to the nucleus and cytoplasm. The soft area of each region is
+\begin{equation}
+\hat{A}_n=\sum_i p_{n,i}, \qquad \hat{A}_c=\sum_i p_{c,i}.
+\label{eq:softarea}
+\end{equation}
+The ratio-consistency term compares the predicted and true ratios in log space, using a Huber function to limit the effect of outlier cells:
+\begin{equation}
+\mathcal{L}_{ratio}=\operatorname{Huber}\!\left[
+\log\!\left(\frac{\hat{A}_n+\epsilon}{\hat{A}_c+\epsilon}\right)-
+\log\!\left(\frac{A_n+\epsilon}{A_c+\epsilon}\right)
+\right].
+\label{eq:ratioloss}
+\end{equation}
+ 
+\subsection{Ratio-Feedback Gate}
+\label{sec:rfg}
+ 
+The ratio-consistency loss corrects the network's ratio error only at training time, after the full forward pass, giving the network no internal mechanism to act on this signal before committing to a prediction. The RFG addresses this: a lightweight module inserted between the decoder's final feature map and the segmentation head, which computes a live estimate of the network's own current N:C ratio and uses it to recalibrate the decoder features before the final prediction.
+ 
+Let $x\in\mathbb{R}^{B\times C\times H\times W}$ denote the decoder feature map immediately before the segmentation head. A lightweight probe head, separate from the main segmentation head, produces a preliminary three-class prediction
+\begin{equation}
+q=\operatorname{softmax}\big(\operatorname{Conv}_{1\times1}(x)\big).
+\label{eq:probe}
+\end{equation}
+The soft nucleus and cytoplasm areas are computed from $q$ following Eq.~\eqref{eq:softarea}, and their log-ratio follows the first term of Eq.~\eqref{eq:ratioloss}, yielding a scalar per-image estimate $r\in\mathbb{R}^{B\times1}$. This estimate is passed through a two-layer network producing a per-channel gate
+\begin{equation}
+g=\sigma\big(W_2\,\delta(W_1 r)\big)\in\mathbb{R}^{B\times C},
+\label{eq:gate}
+\end{equation}
+where $\delta$ is ReLU and $\sigma$ is sigmoid. The gate is broadcast spatially and used to recalibrate the decoder features through a residual update
+\begin{equation}
+x'=x+x\odot g,
+\label{eq:recalibrate}
+\end{equation}
+where $\odot$ denotes channel-wise multiplication, and $x'$ replaces $x$ at the segmentation head. Because the gate is derived from the network's own soft ratio estimate rather than the raw feature map alone, RFG gives the network a mechanism to preserve the N:C ratio that is structurally paired with the ratio-consistency loss: the loss protects the ratio at training time, and the module protects it during the forward pass itself. RFG adds a small number of parameters relative to the backbone (on the order of 200 for a typical decoder width) and can be enabled or disabled without altering the rest of the architecture, supporting its use in a controlled ablation.
+
+\subsection{Total Training Loss}
+\label{sec:totalloss}
+
+When RFG is enabled, its probe head (Eq.~\eqref{eq:probe}) is additionally trained with its own auxiliary ratio-consistency term, so the gate in Eq.~\eqref{eq:gate} is derived from a probe that is itself being pushed toward the correct ratio rather than from an unconstrained internal estimate. The final training loss is
+\begin{equation}
+\mathcal{L}=\mathcal{L}_{Dice}+\lambda_1\mathcal{L}_{Focal}+\lambda_2\mathcal{L}_{ratio}+\lambda_3\mathcal{L}_{probe},
+\label{eq:totalloss}
+\end{equation}
+where $\mathcal{L}_{probe}$ is the Huber log-ratio loss of Eq.~\eqref{eq:ratioloss} applied to the probe's own estimate $r$ from Eq.~\eqref{eq:probe} rather than the segmentation head's output. $\lambda_1=0.5$ throughout. $\lambda_2$ is ramped linearly from 0 to a target of 0.3 over the first 25\% of training epochs whenever the ratio-consistency loss is enabled, and fixed at 0 for the ``without ratio loss'' ablation configurations. $\lambda_3$ follows the same ramp whenever RFG is enabled, independently of $\lambda_2$. Consequently, the ``RFG only'' ablation configuration (RFG enabled, main ratio-consistency loss disabled) still receives ratio supervision through the probe head: it isolates RFG's architectural recalibration together with its own auxiliary supervision from the main-head ratio-consistency loss, not RFG under a complete absence of ratio information. This scope is carried through into the interpretation of the ablation results in Section~\ref{sec:ablation-caveat}.
+
+\subsection{Ablation Design}
+
+Four configurations are evaluated on the Attention U-Net backbone to isolate the individual and combined contributions of the ratio-consistency loss and RFG: (i)~baseline, neither component; (ii)~ratio-consistency loss only; (iii)~RFG only (with its auxiliary probe supervision, per Section~\ref{sec:totalloss}); (iv)~both, the full proposed method. Each is repeated across five seeds, giving twenty Attention U-Net runs. To test whether RFG's contribution generalizes beyond Attention U-Net's own decoder attention, the plain U-Net backbone is evaluated with RFG on and off, ratio-consistency loss held on in both cases, across five seeds, giving ten further runs. The full Phase~I ablation comprises thirty training runs; within each run, the checkpoint is selected at the epoch with the lowest validation N:C ratio error, with early stopping after 8 epochs without improvement (maximum 50 epochs).
+
+\subsection{Transfer-Learning Strategy}
+
+Given infrastructure constraints, two of the originally planned four regimes are compared on the AML target domain: (i)~training from random initialization directly on the AML pseudo-labeled subset, and (ii)~full-network fine-tuning initialized from the best-performing Phase~I WBCAtt+ checkpoint. Frozen-encoder transfer and stain-augmented fine-tuning are deferred to future work. A model is considered to benefit from transfer only when the improvement is supported by both segmentation metrics and morphometric agreement, not by Dice alone.
+
+\subsection{Target-Domain RFG Ablation}
+
+In addition to the transfer-learning comparison, RFG is evaluated directly on the AML target domain to test whether its Phase~I behavior transfers: for both backbones, a model trained from random initialization on the AML pseudo-labeled subset with RFG enabled is compared against an otherwise identical model with RFG disabled, ratio-consistency loss held on in both cases, across five seeds. All models in this comparison are evaluated on both the AML validation split and the independently human-reviewed gold subset (Section~\ref{sec:pseudolabel}).
+
+\subsection{Data Splits}
+ 
+WBCAtt+ uses its official train/validation/test split throughout. The AML subset uses a stratified 70/15/15 split by morphological class where class sizes permit, with a plain random split as a fallback for classes too small to stratify. No patient- or slide-level grouping information was available, so an image-level split is used and no patient-level generalization claim is made.
+
+\section{Experimental Setup}\label{sec:4}
+
+\subsection{Software and Hardware}
+
+The implementation uses Google Colab as the primary development and training environment, with Python~3.11, PyTorch, Albumentations, OpenCV, scikit-image, SciPy, pandas, and statsmodels. Training is performed on a single Colab-assigned GPU, with Google Drive used for persistent dataset and checkpoint storage between sessions.
+
+\subsection{Training Configuration}
+
+All models are optimized with AdamW (learning rate $10^{-4}$, weight decay $10^{-4}$) and a cosine-annealing learning-rate schedule over the run's maximum epoch budget, under automatic mixed precision. WBCAtt+ models train with a batch size of 24 for up to 50 epochs; AML models train with a batch size of 16 for up to 50 epochs. Training stops early after 8 consecutive epochs without improvement in validation N:C ratio error, which is also the criterion used to select the checkpoint retained for evaluation (rather than validation Dice), so that model selection is aligned with the measurement the study is centered on. $\lambda_1=0.5$ is fixed; $\lambda_2$ and $\lambda_3$ (Section~\ref{sec:totalloss}) are ramped linearly from 0 to 0.3 over the first 25\% of a run's epochs whenever the corresponding component is enabled. Every configuration is repeated across five random seeds (1--5). Per-epoch optimizer, scheduler, scaler, and history state are checkpointed to disk to allow training to resume across interrupted Google Colab sessions.
+
+\subsection{Evaluation Metrics}
+
+Two metrics are tracked during training and used for model selection and headline comparison: the soft Dice coefficient, averaged over the three classes, and the N:C ratio error, the mean absolute difference between the predicted and true per-image log N:C ratio (Eq.~\eqref{eq:ratioloss}, without the Huber transform). A wider battery of metrics is used for the final reported evaluation: per-class precision and recall from the pixel-level confusion matrix (background, cytoplasm, nucleus) on hard (argmax) predictions; boundary F1 at a 2-pixel tolerance, using a distance-transform match between predicted and true class-boundary pixels, to assess edge accuracy independently of interior overlap; predictive-entropy calibration, the mean softmax entropy computed separately over correctly and incorrectly classified pixels; Bland-Altman agreement (bias and 95\% limits of agreement) between the predicted and true per-image N:C log-ratio; and the intraclass correlation coefficient ICC(A,1) (absolute agreement, single measurement) between predicted and true per-image log-ratio, computed with the \texttt{pingouin} package. Configuration- and regime-level comparisons use a paired $t$-test and Cohen's $d$ across the five seeds shared between the two conditions being compared.
+
+\section{Results Analysis}\label{sec:5}
+
+\subsection{In-Domain Evaluation on WBCAtt+}
+
+On the primary Attention U-Net backbone, the baseline configuration (neither the ratio-consistency loss nor RFG) already performs close to ceiling on WBCAtt+: mean Dice $0.9885\pm0.0005$ and mean N:C ratio error $0.0300\pm0.0008$ across five seeds. On the held-out test set ($n=3{,}099$), per-class precision/recall are background 0.9991/0.9995, cytoplasm 0.9845/0.9798, and nucleus 0.9892/0.9893; boundary F1 at 2-pixel tolerance is 0.9802; and the predicted and true N:C log-ratios agree closely (Bland-Altman bias 0.0078, 95\% limits of agreement $[-0.165, 0.180]$; ICC(A,1) $=0.9899$). Cytoplasm is the weakest class in every configuration reported in this study, consistent with its typically diffuse, low-contrast boundary relative to the nucleus.
+
+
+
+\subsection{Ablation Study: Effect of the Ratio-Consistency Loss and the RFG Module}
+\label{sec:ablation}
+
+Table~\ref{tab:ablation} summarizes all six Phase~I configurations, and Table~\ref{tab:pairedtests} reports paired comparisons against the relevant baseline.
+
+\begin{table}[t]
+\caption{Phase~I ablation summary (mean $\pm$ std over 5 seeds).}
+\label{tab:ablation}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Backbone & RFG / Ratio & Dice & Ratio error \\
+\midrule
+Attention U-Net & off / off & 0.9885$\pm$0.0005 & 0.0300$\pm$0.0008 \\
+Attention U-Net & off / on  & 0.9874$\pm$0.0009 & 0.0317$\pm$0.0012 \\
+Attention U-Net & on / off  & 0.9872$\pm$0.0012 & 0.0314$\pm$0.0015 \\
+Attention U-Net & on / on   & 0.9876$\pm$0.0005 & 0.0311$\pm$0.0005 \\
+Plain U-Net     & off / on  & 0.9851$\pm$0.0035 & 0.0332$\pm$0.0030 \\
+Plain U-Net     & on / on   & 0.9866$\pm$0.0010 & 0.0317$\pm$0.0008 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{Paired comparisons against the relevant baseline ($n=5$ seeds).}
+\label{tab:pairedtests}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Comparison & $\Delta$Dice ($p$) & $\Delta$Ratio error ($p$) \\
+\midrule
+Attn: RFG-only vs.\ baseline   & $-$0.0012 (0.140) & $+$0.0013 (0.221) \\
+Attn: ratio-only vs.\ baseline & $-$0.0011 (0.016) & $+$0.0017 (0.008) \\
+Attn: full vs.\ baseline       & $-$0.0009 (0.008) & $+$0.0011 (0.008) \\
+U-Net: RFG-on vs.\ RFG-off     & $+$0.0015 (0.432) & $-$0.0015 (0.342) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figures~\ref{fig:cm-attn}--\ref{fig:ba-unet} visualize the per-class confusion matrices and N:C ratio agreement underlying Table~\ref{tab:ablation}. Agreement metrics add a more differentiated picture than Dice or ratio error alone. On the Attention U-Net (Fig.~\ref{fig:cm-attn}, Fig.~\ref{fig:ba-attn}), the full method changes boundary F1 (0.9802$\to$0.9782), Bland-Altman bias (0.0078$\to$0.0070), and ICC(A,1) (0.9899$\to$0.9898) only marginally relative to baseline. On the plain U-Net (Fig.~\ref{fig:cm-unet}, Fig.~\ref{fig:ba-unet}), enabling RFG moves the same agreement metrics further: boundary F1 0.9774$\to$0.9791, bias 0.0191$\to$0.0093 (roughly halved), and ICC(A,1) 0.9884$\to$0.9899, even though the corresponding Dice/ratio-error difference in Table~\ref{tab:pairedtests} is not statistically significant at $n=5$. Overall, the ratio-consistency loss and RFG do not improve, and on the Attention U-Net significantly worsen, the two headline metrics relative to an already near-ceiling baseline; the one consistent favorable signal is RFG's effect on ratio bias and ICC on the backbone that lacks its own decoder attention, suggesting RFG and scSE attention play an overlapping functional role that does not compound when combined.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{confusion_metrix_att_unet.png}
+\caption{Test-set confusion matrices (row-normalized), Attention U-Net: baseline vs.\ full method.}
+\label{fig:cm-attn}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{confusion_metrix_unet.png}
+\caption{Test-set confusion matrices (row-normalized), plain U-Net: RFG-off vs.\ RFG-on.}
+\label{fig:cm-unet}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{bland_altman.png}
+\caption{Bland-Altman agreement between predicted and true N:C log-ratio on the WBCAtt+ test set, Attention U-Net: baseline vs.\ full method.}
+\label{fig:ba-attn}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{bland_altman_unet.png}
+\caption{Bland-Altman agreement between predicted and true N:C log-ratio on the WBCAtt+ test set, plain U-Net: RFG-off vs.\ RFG-on.}
+\label{fig:ba-unet}
+\end{figure}
+
+
+
+\subsubsection*{Scope of this ablation}
+\label{sec:ablation-caveat}
+
+As established in Section~\ref{sec:totalloss}, the RFG-only and full-method configurations receive ratio supervision through the probe head's auxiliary loss ($\lambda_3$) whenever RFG is enabled, independently of whether the main-head ratio-consistency loss ($\lambda_2$) is active. The comparisons above therefore isolate RFG's architectural recalibration together with this auxiliary supervision from the main-head ratio-consistency loss; they do not isolate RFG under a complete absence of ratio information. Results attributed to RFG throughout this study should be read under that scope.
+
+
+\subsection{Target-Domain Evaluation on AML-Cytomorphology LMU}
+
+Table~\ref{tab:transfer} compares training the full method (Attention U-Net, RFG and ratio-consistency loss both enabled) from random initialization against initializing from the best Phase~I WBCAtt+ checkpoint, evaluated on both the AML validation split and the independently human-reviewed 50-image gold subset (Section~\ref{sec:pseudolabel}).
+
+\begin{table}[t]
+\caption{Transfer-learning comparison, Attention U-Net full method (mean over 5 seeds).}
+\label{tab:transfer}
+\centering
+\begin{tabular}{llcc}
+\toprule
+Eval.\ set & Regime & Dice & Ratio error \\
+\midrule
+Validation   & scratch    & 0.816 & 0.238 \\
+Validation   & pretrained & 0.898 & 0.225 \\
+Gold subset  & scratch    & 0.768 & 0.499 \\
+Gold subset  & pretrained & 0.858 & 0.492 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Pretraining on WBCAtt+ significantly improves Dice on both the validation split ($+0.082$, $t=4.69$, $p=0.009$) and the gold subset ($+0.090$, $t=5.07$, $p=0.007$), but does not significantly change ratio error on either set (validation: $t=-1.57$, $p=0.19$; gold: $t=-0.29$, $p=0.78$). This is the clearest demonstration in this study of the claim motivating the proposed framework (Section~\ref{sec:pipeline}): a substantial, significant gain in an overlap-based metric is not accompanied by a matched gain in the morphometric measurement of clinical interest. By the criterion set out in Section~\ref{sec:pipeline} (transfer is credited only when both segmentation and morphometric agreement improve), pretraining should be credited with improving target-domain segmentation overlap, not with improving N:C ratio reliability.
+
+Table~\ref{tab:amlrfg} compares RFG on and off directly on the AML target domain (ratio-consistency loss held on, training from random initialization, gold-subset evaluation).
+
+\begin{table}[t]
+\caption{Target-domain RFG ablation, gold subset (mean over 5 seeds).}
+\label{tab:amlrfg}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Backbone & RFG & Dice & Ratio error \\
+\midrule
+Attention U-Net & off & 0.792 & 0.487 \\
+Attention U-Net & on  & 0.768 & 0.499 \\
+Plain U-Net     & off & 0.812 & 0.478 \\
+Plain U-Net     & on  & 0.786 & 0.507 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On the target domain, RFG does not reproduce even the narrow benefit seen on the plain U-Net backbone in Phase~I: it is numerically worse than RFG-off for both backbones (Attention U-Net: $\Delta$Dice $=-0.024$, $p=0.15$; $\Delta$ratio error $=+0.011$, $p=0.47$; plain U-Net: $\Delta$Dice $=-0.026$, $p=0.077$; $\Delta$ratio error $=+0.029$, $p=0.20$), though none of these differences reach significance at $n=5$. A likely contributor is that the gate produced by RFG changes little over training: across every Phase~I and Phase~II run, the mean gate value moves from its initialization ($\approx0.018$) to only $\approx0.019$--$0.020$ by convergence, regardless of dataset or backbone, indicating the module applies a close-to-identity recalibration ($x' \approx 1.02x$) throughout training rather than a substantially learned one, consistent with its small, largely neutral-to-negative effect across both phases of this study.
+
+Ratio error and cytoplasm segmentation quality are both markedly worse on the target domain than on WBCAtt+ (e.g., gold-subset cytoplasm precision/recall of 0.58--0.62/0.75--0.80 versus 0.98/0.98 on the WBCAtt+ test set). Because AML training labels are themselves automatically generated pseudo-labels (Section~\ref{sec:pseudolabel}), part of this gap reflects label noise rather than model error alone; the gold-subset ICC(A,1) of 0.55--0.57 (versus 0.99 on WBCAtt+) should be read as a joint model-and-label-uncertainty figure, not a pure measure of model reliability.
+
+Figures~\ref{fig:ba-attn-aml} and \ref{fig:ba-unet-aml} show Bland-Altman agreement on the gold subset for representative checkpoints of each backbone. Unlike the near-zero bias observed on WBCAtt+, both backbones show a substantial negative bias on the target domain ($-$0.257 to $-$0.371 for Attention U-Net, $-$0.260 to $-$0.291 for plain U-Net), indicating a systematic underestimation of the N:C ratio on AML images rather than symmetric noise around the true value; RFG shifts this bias further negative for the Attention U-Net and slightly less negative for the plain U-Net, neither a clear improvement.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{bland_altman_attn_rfg_aml.png}
+\caption{Bland-Altman agreement on the AML gold subset, Attention U-Net: RFG-off vs.\ RFG-on (seed 2).}
+\label{fig:ba-attn-aml}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{bland_altman_unet_rfg_aml.png}
+\caption{Bland-Altman agreement on the AML gold subset, plain U-Net: RFG-off vs.\ RFG-on (seed 3).}
+\label{fig:ba-unet-aml}
+\end{figure}
+
+
+\subsection{Qualitative Analysis}
+
+Across every configuration and both datasets, cytoplasm is consistently the weakest class by precision and recall, reflecting its diffuse, low-contrast boundary relative to the more strongly stained nucleus, while nucleus and background remain the most reliably segmented classes even on the noisier target domain. Predictive entropy is consistently higher on incorrectly than correctly classified pixels in every configuration tested (by one to two orders of magnitude on WBCAtt+; e.g., baseline Attention U-Net: 0.0026 vs.\ 0.349), indicating model confidence remains a usable, if imperfect, error signal even where the ratio-consistency mechanisms do not improve headline agreement.
+
+
+\subsection{Discussion}
+\label{sec:resultsdiscussion}
+
+The results support a narrower, more specific claim than the initial hypothesis that explicit ratio supervision uniformly improves N:C ratio reliability. First, both mechanisms' effect is backbone-dependent: on the Attention U-Net, whose decoder already performs scSE-based feature recalibration, adding ratio-aware recalibration and supervision does not help and, for the ratio-consistency loss alone, significantly reduces both Dice and ratio agreement relative to baseline; on the plain U-Net, which has no comparable built-in recalibration, RFG improves ratio bias and ICC without a significant Dice cost. This suggests RFG and scSE attention serve an overlapping functional role (feature recalibration before or within the decoder), so combining both does not compound their benefit. Second, and more directly relevant to this paper's motivating argument, the transfer-learning result on AML-Cytomorphology\_LMU (Table~\ref{tab:transfer}) is itself a controlled demonstration that Dice improvement and N:C ratio improvement are separable outcomes: pretraining moves Dice by $+0.09$ ($p=0.007$) while leaving ratio error statistically unchanged ($p=0.78$). This is direct empirical support for evaluating segmentation intended for morphometric use by the downstream measurement, independently of overlap metrics, regardless of whether the specific mechanisms proposed here are the ones that ultimately close that gap.
+
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+\begin{itemize}
+\item The AML training subset is small and class-imbalanced (345 images, 15 classes), yielding high seed-to-seed variance from random initialization (gold-subset Dice 0.70--0.86).
+\item AML reference masks, including the gold subset, are single-pass corrected pseudo-labels rather than multi-expert consensus, so absolute AML ratio-error and ICC values reflect combined model-and-label uncertainty.
+\item RFG's probe head is auxiliary-supervised whenever RFG is enabled (Section~\ref{sec:totalloss}), so the ``RFG only'' condition is not a fully isolated architectural comparison.
+\item Frozen-encoder transfer and stain-augmented fine-tuning are deferred to future work due to single-GPU infrastructure constraints.
+\item Paired comparisons are uncorrected for multiplicity; only findings with $p<0.01$ should be treated as robust, given the $n=5$ seed budget.
+\end{itemize}
+
+
+\section{Conclusion} \label{sec:conclusion}
+
+This study proposed two independently switchable, low-overhead mechanisms, a ratio-consistency loss and a Ratio-Feedback Gate, to directly target N:C ratio preservation in nucleus--cytoplasm segmentation for AML morphometry, and evaluated them under a controlled ablation across two backbones and two datasets. Neither mechanism produced a uniform improvement: their effect depends on whether the backbone already performs its own decoder-level feature recalibration, helping ratio agreement on a plain U-Net but not on an Attention U-Net with scSE decoder attention, and showing no reliable benefit after transfer to the noisier AML target domain. The study's clearest finding is orthogonal to the specific mechanisms tested: transferring a WBCAtt+-pretrained checkpoint to AML-Cytomorphology\_LMU significantly improves Dice but leaves N:C ratio error statistically unchanged, empirically confirming this paper's motivating claim that overlap-based segmentation quality and morphometric measurement reliability are separable outcomes that must be evaluated and reported independently. Future work should resolve the AML pseudo-label noise ceiling with a larger expert-verified reference set, evaluate frozen-encoder and stain-augmented transfer regimes, and decouple RFG's architectural recalibration from its auxiliary probe supervision to isolate each mechanism's independent contribution.
+
+
+\backmatter
+
+
+\section*{Declarations}
+
+\subsection*{Data Availability}
+
+The datasets used in this study are publicly available subject to their respective licenses and usage terms. The WBCAtt+ dataset is available through Hugging Face at
+\url{https://huggingface.co/datasets/apple2373/wbcattplus}
+and GitHub at
+\url{https://github.com/apple2373/wbcattplus}.
+
+The AML-Cytomorphology\_LMU dataset is available through The Cancer Imaging Archive at
+\url{https://www.cancerimagingarchive.net/collection/aml-cytomorphology_lmu/},
+with DOI:
+\href{https://doi.org/10.7937/tcia.2019.36f5o9ld}{10.7937/tcia.2019.36f5o9ld}.
+
+\subsection*{Code Availability}
+
+The source code developed for this study is publicly available at:
+\url{https://github.com/sumaiyaSultanaTarin/AML-Blast-Cell-Segmentation}.
+
+The implementation was developed using Python 3.11 and includes PyTorch, Albumentations, OpenCV, scikit-image, SciPy, pandas, statsmodels, and segmentation-models-pytorch.
+
+\bibliography{sn-bibliography}% common bib file
+
+\end{document}
