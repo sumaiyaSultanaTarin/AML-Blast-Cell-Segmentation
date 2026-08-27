@@ -32,7 +32,8 @@ This repository contains the implementation for a study that:
 ├── AML_Phase_II.ipynb   # Target-domain (AML-Cytomorphology_LMU) pipeline: pseudo-label
 │                         # generation, gold-subset creation, transfer learning, RFG ablation
 ├── main.tex              # Manuscript source (IEEE format)
-├── references.bib        # Bibliography
+├── references.bib     # Bibliography
+├── Figures.draw.io         
 ├── requirements.txt      # Python package dependencies
 ├── config.yaml           # Consolidated reference of all hyperparameters used
 └── README.md
