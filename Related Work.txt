@@ -1,0 +1,35 @@
+\section{Related Work}\label{sec:2}
+
+\subsection{Segmentation-Assisted Leukemia Analysis}
+
+Several leukemia systems use segmentation mainly as a preparation step for classification. A transfer-learning fusion model combined synthetic augmentation, color normalization, deep features, and semantic segmentation before identifying leukocyte classes \cite{29}. A U-Net-based framework similarly used segmentation and feature extraction to support ALL and AML categorization across multiple datasets \cite{30}. DeepSegNet compared improved PSPNet, feature-pyramid, and DeepLabV3+ variants for blood-cell image segmentation \cite{31}. A more recent lightweight pipeline used U-Net to remove background regions before blood-cell classification \cite{32}. An explainable computer-aided system for acute lymphoblastic leukemia also placed robust WBC segmentation before the final classifier \cite{33}.
+
+These studies support the value of segmentation, but their main target is usually diagnostic classification. The segmentation is often judged by global overlap or accuracy, and the later analysis does not test whether internal compartment measurements are preserved. This is an important difference from the present study, where segmentation is treated as a measurement tool.
+
+\subsection{Leukocyte Classification and Representation Learning}
+
+Fine-grained WBC classification remains difficult because visually similar classes are often imbalanced. A global--local attention transformer was designed to learn both complete-cell and local morphological information under class imbalance \cite{34}. ConcatNeXt combined ConvNeXt-style feature extraction with nested patch-based feature engineering for blood-cell classification \cite{35}. A custom deep network used heatmaps to show which WBC image regions contributed to each prediction \cite{36}. A lightweight efficient-channel-attention network focused on cross-dataset classification and reduced computational cost \cite{37}. MayGAN used generative augmentation and mayfly optimization to improve leukemia classification from blood-smear images \cite{38}.
+
+These classification studies provide useful ideas for feature learning, imbalance handling, and explainability. However, they do not directly validate the geometry of predicted nucleus and cytoplasm masks. A correct class prediction can still be produced from incomplete or biased morphological regions.
+
+\subsection{Recent Segmentation Architectures}
+
+Hybrid convolutional architectures have been proposed to improve local and global feature extraction. BCU-Net combines ConvNeXt blocks with the U-Net structure and includes a loss design for class imbalance \cite{39}. KC-UNet adds Kolmogorov--Arnold Network components and channel--spatial attention to a U-shaped medical-segmentation model \cite{40}. A U-Net++ and attention-gate model has also been evaluated on multi-modal high-resolution cell images with varied sizes and impurities \cite{41}. A saliency-enhanced framework was designed to improve stain robustness and provide more interpretable WBC segmentation and classification \cite{42}.
+
+Public data remain a limiting factor. The KRD-WBC resource contains 600 high-resolution WBC images and whole-cell masks, but its authors note that further annotation is still needed for separate nucleus and cytoplasm analysis \cite{43}. A methodological review of red blood cell analysis shows that measurements such as area, perimeter, circularity, and shape are only useful when segmentation is stable under overlap and staining variation \cite{44}. Although the cell type is different, this point directly applies to AML morphometry.
+
+\subsection{Annotation Quality and Measurement Agreement}
+
+Human-in-the-loop annotation is becoming more common when full manual segmentation is too slow. A SAM2-based RGB--thermal pipeline showed that automatic proposals can reduce annotation time when human refinement and inter-annotator quality checks are retained \cite{45}. Although that study is outside hematology, its quality-control design is relevant to the planned AML annotation workflow.
+
+Agreement analysis is also needed because automated and visual measurements may not be interchangeable. A recent brain-morphometry study found poor agreement between visual ratings and automated measurements even when both were related to the same clinical problem \cite{46}. This does not prove the same result for blood cells, but it shows why correlation alone is not enough for method comparison. The wider lesson is that expert context and explicit disagreement analysis remain necessary when morphology is ambiguous.
+
+\subsection{Leukemia Reviews and Emerging Explainable Models}
+
+Recent systematic reviews describe rapid growth in machine learning, deep learning, transfer learning, and optimization-based leukemia analysis \cite{48}. A separate review of blood-smear leukemia classification also identified limited datasets, uneven validation, and weak clinical testing as repeated problems \cite{49}. A survey of acute leukemia and WBC analysis found that preprocessing, segmentation, feature extraction, and classification are still commonly evaluated as separate stages \cite{50}. Explainable transformer models have begun to combine attention, memory, causal reasoning, and counterfactual analysis for leukemia diagnosis \cite{51}. Slide-level multiple-instance learning has also been used to connect interpretable cell-level evidence with hematologic diagnosis from peripheral-blood smears \cite{52}.
+
+\subsection{Loss Functions for Segmentation and Measurement Accuracy}
+
+Most segmentation losses, such as Dice and cross-entropy, only check pixel overlap and do not protect the specific measurement a task actually needs. Sun et al. proposed the Boundary DoU loss, which focuses on the border area to produce sharper edges \cite{55}. Szustakowski et al. made a similar point for a different measurement, showing that standard losses can produce masks with good overlap scores while still breaking structure length, so they designed a loss that directly protects length instead \cite{56}. This shows that a loss built around the true target measurement works better than one built around pixel overlap alone. In our case, the target measurement is the nucleus-to-cytoplasm ratio.
+
+The reviewed literature shows three connected gaps. First, AML datasets rarely provide expert masks for separate nucleus and cytoplasm compartments. Second, segmentation is usually evaluated as an image-processing output rather than as the source of a continuous biological measurement. Third, uncertainty and annotator disagreement are rarely linked with the error of the final morphometric value. The proposed study addresses these gaps through AML-specific compartment annotation, cross-domain transfer, direct measurement agreement, and selective expert review.
