@@ -1,0 +1,131 @@
+\section{Methodology}\label{sec:3}
+
+\subsection{Study Design}
+
+The research follows two connected phases. Phase I trains and validates the proposed ratio-consistency loss and the proposed RFG module on the source-domain WBCAtt+ dataset, using its full official split and a controlled ablation across two backbone architectures. Phase II transfers the best-performing Phase I configuration to the target-domain AML-Cytomorphology LMU dataset, using automatically generated pseudo-labels. Separating the phases prevents target-domain claims from being made before the source-domain foundation is validated.
+
+\subsection{Pipeline Overview}
+\label{sec:pipeline}
+ 
+Figure~\ref{fig:overview} shows the full flow of the proposed method, organized into three stages: feature learning, compartment prediction, and morphometric-consistency supervision. A normalized input cell image is passed through the segmentation backbone (Attention U-Net illustrated), where encoder features at each downsampling level are propagated to the decoder through skip connections; at the Attention U-Net's decoder blocks, concurrent spatial and channel squeeze-and-excitation (scSE) attention recalibrates the fused features, preserving fine spatial detail relevant to thin cytoplasmic boundaries alongside the deep semantic features formed at the bottleneck.
+ 
+Before the resulting decoder feature map reaches the segmentation head, it is passed through the proposed RFG, which estimates the network's current soft nucleus-to-cytoplasm ratio from a lightweight probe head and uses it to recalibrate the decoder features (full formulation in Section~\ref{sec:rfg}). The segmentation head then applies a $1\times1$ convolution and softmax to the recalibrated features, producing three soft probability maps, background, cytoplasm, and nucleus, combined by argmax into the final hard masks.
+ 
+These outputs are used in two ways: the soft probability maps are compared with the reference mask using standard segmentation losses, Dice and Focal; and separately, the same soft maps yield a predicted N:C ratio in log space, compared with the true ratio from the expert three-class mask through the ratio-consistency loss (Section~\ref{sec:ratioloss}). All three terms are combined into one total loss (Section~\ref{sec:totalloss}). The RFG module and the ratio-consistency loss can each be switched on or off independently, which allows their individual and combined contributions to be isolated through ablation.
+ 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{archi.pdf}
+\caption{Overview of the proposed pipeline: feature learning with skip connections and scSE decoder attention, the Ratio-Feedback Gate, compartment prediction, and morphometric-consistency supervision.}
+\label{fig:overview}
+\end{figure*}
+
+
+\subsection{Datasets and Class Mapping}
+ 
+WBCAtt+ is used as the source-domain dataset because it contains 10,298 WBC images with detailed component annotations~\cite{47}. Its official split contains 6,169 training, 1,030 validation, and 3,099 test image--mask pairs, confirmed against the downloaded dataset, at a native resolution of $360\times360$. Raw masks contain six classes: background, cytoplasm, nucleus, red blood cell, platelet, and vacuole. For three-class training, nucleus pixels remain nucleus, ordinary cytoplasm and vacuole pixels are merged into cytoplasm, and red blood cells, platelets, and surrounding regions are treated as background. All Phase I experiments use the complete official split.
+ 
+AML-Cytomorphology~LMU is used as the target-domain image dataset. The dataset directory contains 18,250 single-cell images across fifteen morphological classes. Consistent with the source-domain grouping rationale, myeloblasts (MYO), monoblasts (MOB), promyelocytes (PMO, PMB), myelocytes (MYB), and metamyelocytes (MMZ) are grouped as blast-lineage or immature myeloid precursor cells (target 45 images each); the remaining nine classes (BAS, EBO, EOS, KSC, LYA, LYT, MON, NGB, NGS) are treated as mature or control cells (target 20 images each). Fifty images spanning all fifteen classes were withheld beforehand to form the gold subset (Section~\ref{sec:pseudolabel}); the training subset was then sampled from the remaining pool. Several classes fell short of their target because the underlying class is rare in the source dataset (blast-lineage: MMZ 13/45, MOB 24/45, PMB 16/45, MYB 40/45; control: KSC 13/20, LYA 9/20), so the training subset totals 345 images.
+ 
+Table~\ref{tab:datasets} summarizes the role, scale, and main limitation of each dataset used in the study.
+ 
+\begin{table*}[t]
+\caption{Dataset roles used in this study.}
+\label{tab:datasets}
+\centering
+\begin{tabular}{p{2.6cm}p{3.0cm}p{4.3cm}p{5.0cm}}
+\toprule
+Dataset & Role & Scale & Main limitation \\
+\midrule
+WBCAtt+ & Source-domain pretraining and Phase~I ablation & 10,298 image--mask pairs, $360\times360$; official split 6{,}169/1{,}030/3{,}099 & Mature WBCs rather than AML blasts \\
+AML-Cytomorphology~LMU & Target-domain fine-tuning and evaluation (Phase~II) & 18,250 images across 15 classes; 345-image blast/control training subset plus a 50-image human-reviewed gold subset & No expert nucleus--cytoplasm masks; reference labels are auto-generated pseudo-labels, not ground truth; no patient identifiers available \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Preprocessing and Augmentation}
+
+WBCAtt+ images are normalized per channel and trained at native $360\times360$ resolution, with horizontal/vertical flips, rotation within $\pm15^{\circ}$, and mild color jitter applied identically to image and mask. AML images are resized to $256\times256$, with the same flip and jitter augmentations plus rotation within $\pm20^{\circ}$ and mild affine translation and scaling; the higher augmentation strength reflects the smaller subset size and greater staining variability across AML classes.
+
+\subsection{Segmentation Backbones}
+
+Two backbones are used for the Phase I ablation: Attention U-Net (ResNet-34 encoder, squeeze-and-excitation decoder attention) as the primary backbone, and a plain U-Net (ResNet-34 encoder, no decoder attention) as a control, testing whether the RFG module's contribution is backbone-agnostic rather than dependent on Attention U-Net's own attention mechanism. Table~\ref{tab:models} lists the role of each backbone.
+ 
+\begin{table}[t]
+\caption{Segmentation backbones used in this study.}
+\label{tab:models}
+\centering
+\begin{tabular}{p{2.3cm}p{5.0cm}}
+\toprule
+Backbone & Role \\
+\midrule
+Attention U-Net & Primary backbone; full ablation of RFG and ratio-consistency loss \\
+Plain U-Net & Control backbone; tests whether RFG's contribution generalizes beyond Attention U-Net's own decoder attention \\
+\bottomrule
+\end{tabular}
+\end{table}
+ 
+\subsection{Ratio-Consistency Loss}
+\label{sec:ratioloss}
+ 
+Standard Dice and Focal losses only measure mask overlap; they do not check whether a downstream measurement, such as the N:C ratio, is correct. Let $p_{n,i}$ and $p_{c,i}$ denote the predicted probability of pixel $i$ belonging to the nucleus and cytoplasm. The soft area of each region is
+\begin{equation}
+\hat{A}_n=\sum_i p_{n,i}, \qquad \hat{A}_c=\sum_i p_{c,i}.
+\label{eq:softarea}
+\end{equation}
+The ratio-consistency term compares the predicted and true ratios in log space, using a Huber function to limit the effect of outlier cells:
+\begin{equation}
+\mathcal{L}_{ratio}=\operatorname{Huber}\!\left[
+\log\!\left(\frac{\hat{A}_n+\epsilon}{\hat{A}_c+\epsilon}\right)-
+\log\!\left(\frac{A_n+\epsilon}{A_c+\epsilon}\right)
+\right].
+\label{eq:ratioloss}
+\end{equation}
+ 
+\subsection{Ratio-Feedback Gate}
+\label{sec:rfg}
+ 
+The ratio-consistency loss corrects the network's ratio error only at training time, after the full forward pass, giving the network no internal mechanism to act on this signal before committing to a prediction. The RFG addresses this: a lightweight module inserted between the decoder's final feature map and the segmentation head, which computes a live estimate of the network's own current N:C ratio and uses it to recalibrate the decoder features before the final prediction.
+ 
+Let $x\in\mathbb{R}^{B\times C\times H\times W}$ denote the decoder feature map immediately before the segmentation head. A lightweight probe head, separate from the main segmentation head, produces a preliminary three-class prediction
+\begin{equation}
+q=\operatorname{softmax}\big(\operatorname{Conv}_{1\times1}(x)\big).
+\label{eq:probe}
+\end{equation}
+The soft nucleus and cytoplasm areas are computed from $q$ following Eq.~\eqref{eq:softarea}, and their log-ratio follows the first term of Eq.~\eqref{eq:ratioloss}, yielding a scalar per-image estimate $r\in\mathbb{R}^{B\times1}$. This estimate is passed through a two-layer network producing a per-channel gate
+\begin{equation}
+g=\sigma\big(W_2\,\delta(W_1 r)\big)\in\mathbb{R}^{B\times C},
+\label{eq:gate}
+\end{equation}
+where $\delta$ is ReLU and $\sigma$ is sigmoid. The gate is broadcast spatially and used to recalibrate the decoder features through a residual update
+\begin{equation}
+x'=x+x\odot g,
+\label{eq:recalibrate}
+\end{equation}
+where $\odot$ denotes channel-wise multiplication, and $x'$ replaces $x$ at the segmentation head. Because the gate is derived from the network's own soft ratio estimate rather than the raw feature map alone, RFG gives the network a mechanism to preserve the N:C ratio that is structurally paired with the ratio-consistency loss: the loss protects the ratio at training time, and the module protects it during the forward pass itself. RFG adds a small number of parameters relative to the backbone (on the order of 200 for a typical decoder width) and can be enabled or disabled without altering the rest of the architecture, supporting its use in a controlled ablation.
+
+\subsection{Total Training Loss}
+\label{sec:totalloss}
+
+When RFG is enabled, its probe head (Eq.~\eqref{eq:probe}) is additionally trained with its own auxiliary ratio-consistency term, so the gate in Eq.~\eqref{eq:gate} is derived from a probe that is itself being pushed toward the correct ratio rather than from an unconstrained internal estimate. The final training loss is
+\begin{equation}
+\mathcal{L}=\mathcal{L}_{Dice}+\lambda_1\mathcal{L}_{Focal}+\lambda_2\mathcal{L}_{ratio}+\lambda_3\mathcal{L}_{probe},
+\label{eq:totalloss}
+\end{equation}
+where $\mathcal{L}_{probe}$ is the Huber log-ratio loss of Eq.~\eqref{eq:ratioloss} applied to the probe's own estimate $r$ from Eq.~\eqref{eq:probe} rather than the segmentation head's output. $\lambda_1=0.5$ throughout. $\lambda_2$ is ramped linearly from 0 to a target of 0.3 over the first 25\% of training epochs whenever the ratio-consistency loss is enabled, and fixed at 0 for the ``without ratio loss'' ablation configurations. $\lambda_3$ follows the same ramp whenever RFG is enabled, independently of $\lambda_2$. Consequently, the ``RFG only'' ablation configuration (RFG enabled, main ratio-consistency loss disabled) still receives ratio supervision through the probe head: it isolates RFG's architectural recalibration together with its own auxiliary supervision from the main-head ratio-consistency loss, not RFG under a complete absence of ratio information. This scope is carried through into the interpretation of the ablation results in Section~\ref{sec:ablation-caveat}.
+
+\subsection{Ablation Design}
+
+Four configurations are evaluated on the Attention U-Net backbone to isolate the individual and combined contributions of the ratio-consistency loss and RFG: (i)~baseline, neither component; (ii)~ratio-consistency loss only; (iii)~RFG only (with its auxiliary probe supervision, per Section~\ref{sec:totalloss}); (iv)~both, the full proposed method. Each is repeated across five seeds, giving twenty Attention U-Net runs. To test whether RFG's contribution generalizes beyond Attention U-Net's own decoder attention, the plain U-Net backbone is evaluated with RFG on and off, ratio-consistency loss held on in both cases, across five seeds, giving ten further runs. The full Phase~I ablation comprises thirty training runs; within each run, the checkpoint is selected at the epoch with the lowest validation N:C ratio error, with early stopping after 8 epochs without improvement (maximum 50 epochs).
+
+\subsection{Transfer-Learning Strategy}
+
+Given infrastructure constraints, two of the originally planned four regimes are compared on the AML target domain: (i)~training from random initialization directly on the AML pseudo-labeled subset, and (ii)~full-network fine-tuning initialized from the best-performing Phase~I WBCAtt+ checkpoint. Frozen-encoder transfer and stain-augmented fine-tuning are deferred to future work. A model is considered to benefit from transfer only when the improvement is supported by both segmentation metrics and morphometric agreement, not by Dice alone.
+
+\subsection{Target-Domain RFG Ablation}
+
+In addition to the transfer-learning comparison, RFG is evaluated directly on the AML target domain to test whether its Phase~I behavior transfers: for both backbones, a model trained from random initialization on the AML pseudo-labeled subset with RFG enabled is compared against an otherwise identical model with RFG disabled, ratio-consistency loss held on in both cases, across five seeds. All models in this comparison are evaluated on both the AML validation split and the independently human-reviewed gold subset (Section~\ref{sec:pseudolabel}).
+
+\subsection{Data Splits}
+ 
+WBCAtt+ uses its official train/validation/test split throughout. The AML subset uses a stratified 70/15/15 split by morphological class where class sizes permit, with a plain random split as a fallback for classes too small to stratify. No patient- or slide-level grouping information was available, so an image-level split is used and no patient-level generalization claim is made.
