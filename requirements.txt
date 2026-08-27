@@ -1,0 +1,19 @@
+# Python 3.11
+# Versions were not pinned or logged during the original Google Colab runs
+# (installed via unpinned `pip install -q ...` inside the notebooks), so no
+# exact version numbers are specified here. See README.md, "Note on versions."
+
+torch
+torchvision
+segmentation-models-pytorch
+albumentations
+opencv-python
+scikit-image
+scipy
+pandas
+statsmodels
+pingouin
+huggingface_hub
+matplotlib
+numpy
+Pillow
